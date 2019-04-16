@@ -6,7 +6,7 @@
 import React from 'react';
 import { NavLink, Link } from 'react-router-dom';
 import { Icon } from 'semantic-ui-react';
-import classNames from 'classnames';
+import { classNames } from 'classnames';
 import { subscribe } from 'react-contextual';
 
 import logo from './logo.png';

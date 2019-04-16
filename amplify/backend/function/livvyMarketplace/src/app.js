@@ -15,8 +15,8 @@ if(process.env.ENV && process.env.ENV !== "NONE") {
 
 const partitionKeyName = "id";
 const partitionKeyType = "S";
-const sortKeyName = "";
-const sortKeyType = "";
+const sortKeyName = "userId";
+const sortKeyType = "S";
 const hasSortKey = sortKeyName !== "";
 const path = "/livvyMarketplace";
 const hashKeyPath = '/:' + partitionKeyName;
@@ -43,35 +43,16 @@ const convertUrlType = (param, type) => {
   }
 }
 
-function normalizeId(body) {
-  // if message is sent to a channel, the id is the channel name
-  if (body.channel === true) {
-    return body.to[0];
-  }
-  // Otherwise concatenate all recipients and order alphabetically, separate with ;
-  const all = body.to;
-  all.push(body.from);
-  all.sort((a, b) => {
-    if (a < b) return -1;
-    else return 1;
-  });
-  let id = '';
-  for (let e in all) {
-    id += all[e] + ";";
-  }
-  return id;
-}
-
 /**
  * This function returns the cognito user id (sub id) from the request object.
  * We use it to retrieve the userId for calls that need userId.
  * @param {Object} req The request object
  */
+
 function getUserId(req) {
   const auth = req.apiGateway.event.requestContext.identity.cognitoAuthenticationProvider.split(":");
   return auth[auth.length - 1];
 }
-
 
 /********************************
  * HTTP Get method for list objects *
@@ -94,28 +75,6 @@ app.get(path + hashKeyPath, function(req, res) {
     res.json({ error: 'Wrong column type ' + err });
   }
 
-
-  const QUERY = req.query;
-  const FROM = QUERY["FROM"];
-  const TO = QUERY["TO"];
-
-  if (FROM && TO) {
-    condition[sortKeyName] = {
-      ComparisonOperator: 'BETWEEN',
-      AttributeValueList: [convertUrlType(FROM, sortKeyType), convertUrlType(TO, sortKeyType)]
-    }
-  } else if (FROM) {
-    condition[sortKeyName] = {
-      ComparisonOperator: 'GE',
-      AttributeValueList: [convertUrlType(FROM, sortKeyType)]
-    }
-  } else if (TO) {
-    condition[sortKeyName] = {
-      ComparisonOperator: 'LE',
-      AttributeValueList: [convertUrlType(TO, sortKeyType)]
-    }
-  }
-
   let queryParams = {
     TableName: tableName,
     KeyConditions: condition
@@ -135,38 +94,28 @@ app.get(path + hashKeyPath, function(req, res) {
  *****************************************/
 
 app.get(path + '/object' + hashKeyPath + sortKeyPath, function(req, res) {
+  let userId;
+  try {
+    userId = getUserId(req);
+  } catch (err) { res.json({ statusCode: 401, error: 'Unauthorized access: ' + err }); }
+
   var params = {};
-  if (userIdPresent && req.apiGateway) {
-    params[partitionKeyName] = req.apiGateway.event.requestContext.identity.cognitoIdentityId || UNAUTH;
-  } else {
-    params[partitionKeyName] = req.params[partitionKeyName];
-    try {
-      params[partitionKeyName] = convertUrlType(req.params[partitionKeyName], partitionKeyType);
-    } catch(err) {
-      res.json({error: 'Wrong column type ' + err});
-    }
-  }
-  if (hasSortKey) {
-    try {
-      params[sortKeyName] = convertUrlType(req.params[sortKeyName], sortKeyType);
-    } catch(err) {
-      res.json({error: 'Wrong column type ' + err});
-    }
-  }
+  params[partitionKeyName] = req.params[partitionKeyName];
+  params[sortKeyName] = convertUrlType(req.params[sortKeyName], sortKeyType);
 
   let getItemParams = {
     TableName: tableName,
     Key: params
   }
 
-  dynamodb.get(getItemParams,(err, data) => {
-    if(err) {
-      res.json({error: 'Could not load items: ' + err.message});
+  dynamodb.get(getItemParams, (err, data) => {
+    if (err) {
+      res.json({ error: 'Could not load items: ' + err.message });
     } else {
       if (data.Item) {
         res.json(data.Item);
       } else {
-        res.json(data) ;
+        res.json(data);
       }
     }
   });
@@ -179,21 +128,30 @@ app.get(path + '/object' + hashKeyPath + sortKeyPath, function(req, res) {
 
 app.put(path, function(req, res) {
 
-  if (userIdPresent) {
-    req.body['userId'] = req.apiGateway.event.requestContext.identity.cognitoIdentityId || UNAUTH;
-  }
+  let userId;
+  try {
+    userId = getUserId(req);
+  } catch (err) { res.json({ statusCode: 401, error: 'Unauthorized access: ' + err }); }
+
+  const item = {};
+  item[partitionKeyName] = id;
+  item[sortKeyName] = new Date().getTime();
+  item["uuid"] = uuidv1();
+  item["from"] = userId;
+  item["message"] = req.body.message;
 
   let putItemParams = {
     TableName: tableName,
-    Item: req.body
+    Item: item
   }
   dynamodb.put(putItemParams, (err, data) => {
-    if(err) {
-      res.json({error: err, url: req.url, body: req.body});
-    } else{
-      res.json({success: 'put call succeed!', url: req.url, data: data})
+    if (err) {
+      res.json({ error: err, url: req.url, body: req.body });
+    } else {
+      res.json({ success: 'put call succeed!', url: req.url, data: data })
     }
   });
+
 });
 
 /************************************
@@ -202,59 +160,82 @@ app.put(path, function(req, res) {
 
 app.post(path, function(req, res) {
 
-  if (userIdPresent) {
-    req.body['userId'] = req.apiGateway.event.requestContext.identity.cognitoIdentityId || UNAUTH;
+  let userId;
+  try {
+    userId = getUserId(req);
+  } catch (err) { res.json({ statusCode: 401, error: 'Unauthorized access: ' + err }); }
+
+  const tableKey = {};
+  tableKey[partitionKeyName] = userId;
+
+  if (!req.body[sortKeyName]) {
+    res.json({ statusCode: 500, error: 'Missing sort key.' });
   }
 
-  let putItemParams = {
-    TableName: tableName,
-    Item: req.body
+  tableKey[sortKeyName] = convertUrlType(req.params[sortKeyName], sortKeyType);
+
+  var updateExpression = "set ";
+  var expressionAttributeValues = {}
+
+  const items = {};
+  items["updated"] = new Date().getTime();
+
+  for (var key in items) {
+    updateExpression = updateExpression + key + " = :" + key + ","
+    expressionAttributeValues[":" + key] = items[key]
   }
-  dynamodb.put(putItemParams, (err, data) => {
-    if(err) {
-      res.json({error: err, url: req.url, body: req.body});
-    } else{
-      res.json({success: 'post call succeed!', url: req.url, data: data})
+
+  updateExpression = updateExpression.substr(0, updateExpression.length - 1);
+
+  var postItemParams = {
+    TableName: tableName,
+    Key: tableKey,
+    UpdateExpression: updateExpression,
+    ExpressionAttributeValues: expressionAttributeValues,
+    ReturnValues: "UPDATED_NEW"
+  };
+
+  dynamodb.update(postItemParams, (err, data) => {
+    if (err) {
+      res.json({ error: err, url: req.url, body: req.body });
+    } else {
+      res.json({ success: 'Message updated.', url: req.url, data: data })
     }
   });
+
 });
 
 /**************************************
 * HTTP remove method to delete object *
 ***************************************/
 
-app.delete(path + '/object' + hashKeyPath + sortKeyPath, function(req, res) {
-  var params = {};
-  if (userIdPresent && req.apiGateway) {
-    params[partitionKeyName] = req.apiGateway.event.requestContext.identity.cognitoIdentityId || UNAUTH;
-  } else {
-    params[partitionKeyName] = req.params[partitionKeyName];
-     try {
-      params[partitionKeyName] = convertUrlType(req.params[partitionKeyName], partitionKeyType);
-    } catch(err) {
-      res.json({error: 'Wrong column type ' + err});
-    }
-  }
-  if (hasSortKey) {
-    try {
-      params[sortKeyName] = convertUrlType(req.params[sortKeyName], sortKeyType);
-    } catch(err) {
-      res.json({error: 'Wrong column type ' + err});
-    }
-  }
+let userId;
+try {
+  userId = getUserId(req);
+} catch (err) { res.json({ statusCode: 401, error: 'Unauthorized access: ' + err }); }
 
-  let removeItemParams = {
-    TableName: tableName,
-    Key: params
+
+var params = {};
+params[partitionKeyName] = userId;
+
+if (!req.body[sortKeyName]) {
+  res.json({ statusCode: 500, error: 'Missing sort key.' });
+}
+
+params[sortKeyName] = convertUrlType(req.params[sortKeyName], sortKeyType);
+
+let removeItemParams = {
+  TableName: tableName,
+  Key: params
+}
+dynamodb.delete(removeItemParams, (err, data) => {
+  if (err) {
+    res.json({ error: err, url: req.url });
+  } else {
+    res.json({ url: req.url, data: data });
   }
-  dynamodb.delete(removeItemParams, (err, data)=> {
-    if(err) {
-      res.json({error: err, url: req.url});
-    } else {
-      res.json({url: req.url, data: data});
-    }
-  });
 });
+
 app.listen(3000, function() {
     console.log("App started")
 });
