@@ -5,7 +5,7 @@ import { BrowserRouter } from 'react-router-dom';
 import { Provider } from 'react-contextual';
 
 import './index.css';
-import App from './app';
+import App from './App';
 import Messenger from './messenger';
 import Marketplace from './marketplace';
 import Events from './events';
