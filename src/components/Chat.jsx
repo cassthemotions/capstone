@@ -1,116 +1,94 @@
 import React, { Component } from "react";
-import Chatkit from "@pusher/chatkit-client";
-import MessageList from "./MessageList";
-import SendMessageForm from "./SendMessageForm";
-import RoomList from "./RoomList";
-import NewRoomForm from "./NewRoomForm";
-
+import MessagePane from "./MessagePane";
+import ChannelList from "./ChannelList";
 import "./Chat.css";
 
-import { tokenUrl, instanceLocator } from "./config";
+const messages = [
+  {
+    id: 1,
+    text: "hi",
+    author: "Ben",
+    channel_id: 1
+  },
+  {
+    id: 2,
+    text: "hi to you too",
+    author: "Jen",
+    channel_id: 1
+  },
+  {
+    id: 3,
+    text: "hi from another channel",
+    author: "Meg",
+    channel_id: 2
+  },
+  {
+    id: 4,
+    text: "hi to you too from another channel",
+    author: "Jeff",
+    channel_id: 2
+  }
+];
 
-class App extends React.Component {
+const channels = [
+  { id: 1, name: "General room" },
+  { id: 2, name: "Security Team" },
+  { id: 3, name: "Watercooler conversation" }
+];
+
+class App extends Component {
   constructor() {
     super();
+
     this.state = {
-      roomId: null,
-      messages: [],
-      joinableRooms: [],
-      joinedRooms: []
+      messages,
+      channels,
+      selectedChannelId: channels[0].id
     };
-    this.sendMessage = this.sendMessage.bind(this);
-    this.subscribeToRoom = this.subscribeToRoom.bind(this);
-    this.getRooms = this.getRooms.bind(this);
-    this.createRoom = this.createRoom.bind(this);
+
+    this.onSendMessage = this.onSendMessage.bind(this);
+    this.onChannelSelect = this.onChannelSelect.bind(this);
+    this.filteredMessages = this.filteredMessages.bind(this);
   }
 
   componentDidMount() {
-    const chatManager = new Chatkit.ChatManager({
-      instanceLocator,
-      userId: "Jojo",
-      tokenProvider: new Chatkit.TokenProvider({
-        url: tokenUrl
-      })
-    });
-
-    chatManager
-      .connect()
-      .then(currentUser => {
-        this.currentUser = currentUser;
-        this.getRooms();
-      })
-      .catch(err => console.log("error on connecting: ", err));
+    console.log("here");
   }
 
-  getRooms() {
-    this.currentUser
-      .getJoinableRooms()
-      .then(joinableRooms => {
-        this.setState({
-          joinableRooms,
-          joinedRooms: this.currentUser.rooms
-        });
-      })
-      .catch(err => console.log("error on joinableRooms: ", err));
-  }
-
-  subscribeToRoom(roomId) {
-    this.setState({ messages: [] });
-    this.currentUser
-      .subscribeToRoom({
-        roomId: roomId,
-        hooks: {
-          onNewMessage: message => {
-            this.setState({
-              messages: [...this.state.messages, message]
-            });
-          }
-        }
-      })
-      .then(room => {
-        this.setState({
-          roomId: room.id
-        });
-        this.getRooms();
-      })
-      .catch(err => console.log("error on subscribing to room: ", err));
-  }
-
-  sendMessage(text) {
-    this.currentUser.sendMessage({
+  onSendMessage(author, text) {
+    const new_message = {
+      id: this.state.messages[this.state.messages.length - 1].id + 1,
+      author,
       text,
-      roomId: this.state.roomId
-    });
+      channel_id: 1
+    };
+
+    const messages = [...this.state.messages, new_message];
+    this.setState({ messages });
   }
 
-  createRoom(name) {
-    this.currentUser
-      .createRoom({
-        name
-      })
-      .then(room => {
-        this.subscribeToRoom(room.id);
-      })
-      .catch(err => console.log("error with createRoom: ", err));
+  onChannelSelect(id) {
+    this.setState({ selectedChannelId: id });
+  }
+
+  filteredMessages() {
+    return this.state.messages.filter(
+      ({ channel_id }) => channel_id === this.state.selectedChannelId
+    );
   }
 
   render() {
     return (
-      <div className="app">
-        <RoomList
-          subscribeToRoom={this.subscribeToRoom}
-          rooms={[...this.state.joinableRooms, ...this.state.joinedRooms]}
-          roomId={this.state.roomId}
+      <div className="App">
+        <ChannelList
+          channels={this.state.channels}
+          selectedChannelId={this.state.selectedChannelId}
+          onSelect={this.onChannelSelect}
         />
-        <MessageList
-          roomId={this.state.roomId}
-          messages={this.state.messages}
+        <MessagePane
+          messages={this.filteredMessages()}
+          onSendMessage={this.onSendMessage}
         />
-        <SendMessageForm
-          disabled={!this.state.roomId}
-          sendMessage={this.sendMessage}
-        />
-        <NewRoomForm createRoom={this.createRoom} />
       </div>
     );
   }
