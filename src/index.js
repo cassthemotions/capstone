@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom';
 import { Route, Switch, Redirect } from 'react-router';
 import { BrowserRouter } from 'react-router-dom';
 import { Provider } from 'react-contextual';
+import 'typeface-roboto';
 
 import './index.css';
 import App from './App';
